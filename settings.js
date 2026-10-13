@@ -29,6 +29,15 @@ window.STACKT_SETTINGS = {
   // -------------------------------------------------------------------
   currencySymbol: "$",
 
+  // The big headline on the welcome screen, one line each.
+  // The last line is shown in the bright accent color.
+  slogan: [
+    "Pre-workout.",
+    "Post-workout.",
+    "Your workout.",
+    "Built by you.",
+  ],
+
   // The gym name shown in the owner dashboard.
   gymName: "Iron Republic Fitness",
 
@@ -193,16 +202,6 @@ window.STACKT_SETTINGS = {
           ],
         },
         {
-          name: "Fast Carbs",
-          about: "Refuel glycogen",
-          start: "None",
-          options: [
-            { label: "None", price: 0 },
-            { label: "25 g", price: 0.50 },
-            { label: "50 g", price: 0.85 },
-          ],
-        },
-        {
           name: "Electrolytes",
           about: "Rehydrate after you sweat",
           start: "Light",
@@ -247,7 +246,7 @@ window.STACKT_SETTINGS = {
         },
         {
           name: "Refuel",
-          picks: { "Protein": "Whey 25 g", "Fast Carbs": "50 g", "Electrolytes": "Full", "Mixed With": "Coconut Water", "Flavor": "Tropical Citrus" },
+          picks: { "Protein": "Whey 25 g", "Electrolytes": "Full", "Mixed With": "Coconut Water", "Flavor": "Tropical Citrus" },
         },
       ],
     },
@@ -273,7 +272,7 @@ window.STACKT_SETTINGS = {
       perks: [
         "10 custom stacks every month",
         "Any size, any ingredients",
-        "Unused drinks roll over 1 month",
+        "Unused drinks do not roll over",
       ],
     },
     {
