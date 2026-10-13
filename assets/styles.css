@@ -160,7 +160,8 @@ button {
   letter-spacing: -0.005em;
   margin: 0;
 }
-.h1 { font-size: clamp(44px, min(16vw, 8.6vh), 78px); }
+.h1 { font-size: clamp(38px, min(13.5vw, 6.4vh), 64px); }
+.h1 { white-space: nowrap; }
 .h2 { font-size: clamp(38px, 11vw, 52px); }
 .h3 { font-size: 28px; }
 .lime { color: var(--lime); }

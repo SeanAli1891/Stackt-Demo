@@ -207,7 +207,7 @@
         <div class="topbar">${logo(true)}</div>
         <div class="welcome-body">
           <div class="hero-stack" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-          <h1 class="display h1">Fresh-mixed.<br><span class="lime">Built by you.</span></h1>
+          <h1 class="display h1">${sloganHTML()}</h1>
           <p class="lead">Pre and post-workout drinks, mixed on the spot to your exact recipe.</p>
           ${plan ? `<p class="eyebrow" style="margin-top:16px">${esc(plan.name)} active (demo)</p>` : ""}
         </div>
@@ -217,7 +217,25 @@
           ${installHint()}
         </div>`;
     },
+    mount(el) {
+      // Shrink the headline until its longest line fits the screen width.
+      const h1 = el.querySelector(".h1");
+      const fit = () => {
+        h1.style.fontSize = "";
+        let size = parseFloat(getComputedStyle(h1).fontSize);
+        while (h1.scrollWidth > h1.clientWidth + 1 && size > 24) h1.style.fontSize = --size + "px";
+      };
+      fit();
+      if (document.fonts) document.fonts.ready.then(fit);
+    },
   };
+
+  function sloganHTML() {
+    const lines = Array.isArray(S.slogan) && S.slogan.length ? S.slogan : ["Fresh-mixed.", "Built by you."];
+    return lines
+      .map((l, k) => (k === lines.length - 1 && lines.length > 1 ? `<span class="lime">${esc(l)}</span>` : esc(l)))
+      .join("<br>");
+  }
 
   function installHint() {
     const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
