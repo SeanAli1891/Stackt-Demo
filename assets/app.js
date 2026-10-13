@@ -7,6 +7,8 @@
   const app = document.getElementById("app");
   const toastEl = document.getElementById("toast");
   const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  // Shown at the bottom of the owner view, so you can tell which version a phone is running.
+  const APP_VERSION = "4 (Oct 13, 2026)";
 
   // ---------------------------------------------------------------- helpers
 
@@ -82,6 +84,7 @@
   };
   let timers = [];
   let ownerOpen = false;
+  let updateReady = false;
 
   const plans = () => list(S.memberships);
   const planOfKind = (kind) => plans().find((p) => p.kind === kind);
@@ -209,6 +212,8 @@
 
   function go(name, opts) {
     opts = opts || {};
+    // A newer version finished downloading earlier: load it between customers.
+    if (name === "welcome" && updateReady) return location.reload();
     clearTimers();
     const screen = SCREENS[name];
     const el = document.createElement("section");
@@ -301,12 +306,22 @@
         </div>`;
     },
     mount(el) {
-      // Shrink the headline until its longest line fits the screen width.
+      // Shrink the headline until its longest line fits the screen width,
+      // then drop the stack graphic and shrink more if the screen is too short.
       const h1 = el.querySelector(".h1");
+      const hero = el.querySelector(".hero-stack");
       const fit = () => {
+        if (!el.isConnected) return;
         h1.style.fontSize = "";
+        hero.style.display = "";
+        hero.style.height = "";
         let size = parseFloat(getComputedStyle(h1).fontSize);
         while (h1.scrollWidth > h1.clientWidth + 1 && size > 24) h1.style.fontSize = --size + "px";
+        const tooTall = () => el.scrollHeight > el.clientHeight + 1;
+        let heroH = hero.offsetHeight;
+        while (tooTall() && heroH > 56) hero.style.height = (heroH -= 8) + "px";
+        if (tooTall()) hero.style.display = "none";
+        while (tooTall() && size > 32) h1.style.fontSize = --size + "px";
       };
       fit();
       if (document.fonts) document.fonts.ready.then(fit);
@@ -937,7 +952,7 @@
       ${list(o.compliance).length ? `<div class="card"><p class="card-title">Permits, insurance and safety: handled</p>${checks(o.compliance)}</div>` : ""}
       ${list(o.hygiene).length ? `<div class="card"><p class="card-title">Clean every time</p>${checks(o.hygiene)}
         <div class="health-row" style="margin-top:14px"><span>Last sanitized</span><b>${esc(o.lastSanitized || "Today")}</b></div></div>` : ""}
-      <div class="card" style="margin-bottom:calc(var(--safe-bottom) + 24px)"><p class="card-title">Accessible</p>
+      <div class="card"><p class="card-title">Accessible</p>
         ${checks(["Larger text and high-contrast mode on the start screen", "Every control usable by touch, with big tap targets"])}</div>`;
 
     return `
@@ -958,6 +973,7 @@
         <div class="pane" data-pane="results">${results}</div>
         <div class="pane" data-pane="deal" hidden>${deal}</div>
         <div class="pane" data-pane="setup" hidden>${setup}</div>
+        <p class="version">Demo version ${esc(APP_VERSION)}</p>
       </div>`;
   }
 
@@ -1170,9 +1186,28 @@
 
   go("welcome");
 
+  window.addEventListener("resize", () => SCREENS.welcome.fit && SCREENS.welcome.fit());
+
   // Offline support once installed. Always tries the network first,
   // so edits to settings.js show up as soon as the phone is online.
+  // The home-screen app often resumes instead of reloading, so it also
+  // checks for a newer version whenever it comes back on screen, and
+  // switches to it on the welcome screen (never in the middle of a demo).
   if ("serviceWorker" in navigator && location.protocol === "https:") {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || updateReady) return;
+      updateReady = true;
+      const onWelcome = !!app.querySelector(".screen.welcome:not(.leaving)");
+      if (onWelcome && !ownerOpen) location.reload();
+    });
+    navigator.serviceWorker
+      .register("sw.js")
+      .then((reg) => {
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+      })
+      .catch(() => {});
   }
 })();
