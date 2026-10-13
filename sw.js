@@ -1,7 +1,7 @@
 /* Offline support for the home-screen app.
    Network first: when the phone is online it always gets the latest files
    (including your settings.js edits). The saved copy is used only offline. */
-const CACHE = "stackt-v1";
+const CACHE = "stackt-v2";
 const CORE = ["./", "index.html", "settings.js", "assets/styles.css", "assets/app.js", "manifest.webmanifest", "assets/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

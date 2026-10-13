@@ -19,6 +19,7 @@
   const moneyBig = (n) => cur() + Math.round(n).toLocaleString("en-US");
   const isNone = (opt) => /^none$/i.test(String(opt.label).trim());
   const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  const list = (v) => (Array.isArray(v) ? v : []);
 
   const PATHS = {
     back: "M15 18l-6-6 6-6",
@@ -31,6 +32,11 @@
     info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01",
     recover: "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5M12 8v8M8 12h8",
     contactless: "M7 8.5a5 5 0 0 1 0 7M10.5 6.5a8.5 8.5 0 0 1 0 11M14 4.5a12 12 0 0 1 0 15M17.5 2.5a15.5 15.5 0 0 1 0 19",
+    scan: "M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 9v6M11 9v6M14 9v6M17 9v6",
+    star: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z",
+    phone: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM11 18h2",
+    flame: "M12 22c4 0 7-2.7 7-7 0-4-3-6-4-9-1 2-2 3-3.5 3.5C11 7 11 4 9 2c0 4-4 6.5-4 12 0 4.3 3 8 7 8z",
+    alert: "M12 3l10 18H2zM12 10v5M12 18h.01",
   };
   const icon = (name) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
@@ -70,64 +76,128 @@
     mode: null, // "pre" or "post"
     picks: [], // selected option index for each ingredient
     plan: null, // index into S.memberships chosen in the demo
+    member: null, // the demo member after "Scan member tag"
     membershipFrom: "welcome",
+    buildFrom: "choose",
   };
   let timers = [];
   let ownerOpen = false;
 
-  const plans = () => (Array.isArray(S.memberships) ? S.memberships : []);
+  const plans = () => list(S.memberships);
+  const planOfKind = (kind) => plans().find((p) => p.kind === kind);
+  const ingsOf = (mode) => list(S.drinks[mode].ingredients);
   const drink = () => S.drinks[state.mode];
-  const ingredients = () => drink().ingredients || [];
+  const ingredients = () => ingsOf(state.mode);
   const optIndex = (ing, label) => ing.options.findIndex((o) => same(o.label, label));
   const noneIndex = (ing) => ing.options.findIndex(isNone);
   const startIndex = (ing) => Math.max(0, optIndex(ing, ing.start));
-  const pickOf = (i) => ingredients()[i].options[state.picks[i]];
-  const included = () =>
-    ingredients()
-      .map((ing, i) => ({ ing, opt: ing.options[state.picks[i]], i }))
+
+  // Selected, non-"None" ingredients for a drink.
+  const includedOf = (mode, picks) =>
+    ingsOf(mode)
+      .map((ing, i) => ({ ing, opt: ing.options[picks[i]], i }))
       .filter((x) => x.opt && !isNone(x.opt));
+  const included = () => includedOf(state.mode, state.picks);
 
   function startBuild(mode) {
     state.mode = mode;
     state.picks = ingredients().map(startIndex);
   }
 
-  function presetPicks(preset) {
-    const picks = preset.picks || {};
-    return ingredients().map((ing) => {
-      const key = Object.keys(picks).find((k) => same(k, ing.name));
+  // Turns { "Ingredient": "Option" } into option indexes. Missing ones become "None".
+  function picksFrom(mode, named) {
+    named = named || {};
+    return ingsOf(mode).map((ing) => {
+      const key = Object.keys(named).find((k) => same(k, ing.name));
       if (key) {
-        const idx = optIndex(ing, picks[key]);
+        const idx = optIndex(ing, named[key]);
         if (idx >= 0) return idx;
       }
       const n = noneIndex(ing);
       return n >= 0 ? n : startIndex(ing);
     });
   }
+  const namedFrom = (mode, picks) => {
+    const out = {};
+    includedOf(mode, picks).forEach((x) => (out[x.ing.name] = x.opt.label));
+    return out;
+  };
+  const samePicks = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
   const activePreset = () =>
-    (drink().signatureStacks || []).findIndex((p) => presetPicks(p).every((v, i) => v === state.picks[i]));
+    list(drink().signatureStacks).findIndex((p) => samePicks(picksFrom(state.mode, p.picks), state.picks));
 
-  const hasCaffeine = () => ingredients().some((ing) => ing.options.some((o) => num(o.caffeineMg) > 0));
   const caffeineLimit = () => num(S.caffeineLimitMg, 300);
-  const caffeineTotal = (picks) =>
-    ingredients().reduce((sum, ing, i) => sum + num((ing.options[(picks || state.picks)[i]] || {}).caffeineMg), 0);
-  const overLimit = (i, j) => {
+  const hasCaffeine = () => ingredients().some((ing) => ing.options.some((o) => num(o.caffeineMg) > 0));
+  const caffeineOf = (mode, picks) => includedOf(mode, picks).reduce((s, x) => s + num(x.opt.caffeineMg), 0);
+  const caffeineTotal = (picks) => caffeineOf(state.mode, picks || state.picks);
+
+  // ---------------------------------------------------------------- taste rules
+
+  // A rule part looks like ["Ingredient", "option", "option"].
+  function partMatches(part, mode, picks) {
+    if (!Array.isArray(part) || part.length < 2) return false;
+    const ings = ingsOf(mode);
+    const i = ings.findIndex((ing) => same(ing.name, part[0]));
+    if (i < 0) return false;
+    const opt = ings[i].options[picks[i]];
+    return !!opt && part.slice(1).some((l) => same(l, opt.label));
+  }
+  const rulesOf = (mode) => list(S.drinks[mode].tasteRules);
+  const ruleHits = (mode, picks, blocking) =>
+    rulesOf(mode).filter((r) => !!r.block === blocking && partMatches(r.when, mode, picks) && partMatches(r.with, mode, picks));
+
+  // Why option j of ingredient i can't be picked right now (or null).
+  function blockReason(i, j) {
     const picks = state.picks.slice();
     picks[i] = j;
-    return caffeineTotal(picks) > caffeineLimit();
-  };
+    if (caffeineTotal(picks) > caffeineLimit()) {
+      return { short: "over limit", long: `That would go over the ${caffeineLimit()} mg caffeine limit. Lower another caffeine source first.` };
+    }
+    const hit = ruleHits(state.mode, picks, true)[0];
+    return hit ? { short: "doesn't mix", long: hit.message } : null;
+  }
 
-  const price = () => num(drink().basePrice) + included().reduce((s, x) => s + num(x.opt.price), 0);
+  // ---------------------------------------------------------------- prices & nutrition
 
-  // What the customer pays with the demo membership applied.
-  function memberPrice(full) {
-    const plan = plans()[state.plan];
-    if (!plan) return { total: full, note: null };
+  const priceOf = (mode, picks) => num(S.drinks[mode].basePrice) + includedOf(mode, picks).reduce((s, x) => s + num(x.opt.price), 0);
+  const price = () => priceOf(state.mode, state.picks);
+
+  // What the customer pays with a membership applied.
+  function memberPriceOf(mode, picks, planIndex) {
+    const full = priceOf(mode, picks);
+    const plan = plans()[planIndex];
+    if (!plan) return { total: full, full };
     if (plan.kind === "discount") {
       const pct = num(plan.discountPercent);
-      return { total: full * (1 - pct / 100), note: `${plan.name} −${pct}%`, plan };
+      return { total: full * (1 - pct / 100), full, note: `${plan.name} −${pct}%`, plan };
     }
-    return { total: 0, note: `Covered by ${plan.name}`, plan };
+    if (plan.kind === "unlimited") {
+      const club = planOfKind("discount");
+      const pct = club ? num(club.discountPercent) : 0;
+      const premium = includedOf(mode, picks).filter((x) => x.opt.premium).reduce((s, x) => s + num(x.opt.price), 0);
+      const total = premium * (1 - pct / 100);
+      return { total, full, plan, premium, note: total > 0 ? `${plan.name} (premium upgrades extra)` : `Covered by ${plan.name}` };
+    }
+    return { total: 0, full, plan, note: `1 drink from your ${plan.name}` };
+  }
+  const memberPrice = () => memberPriceOf(state.mode, state.picks, state.plan);
+
+  function nutritionOf(mode, picks) {
+    const inc = includedOf(mode, picks);
+    const allergens = [];
+    inc.forEach((x) =>
+      String(x.opt.allergens || "")
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean)
+        .forEach((a) => allergens.includes(a) || allergens.push(a))
+    );
+    return {
+      calories: Math.round(inc.reduce((s, x) => s + num(x.opt.calories), 0)),
+      protein: Math.round(inc.reduce((s, x) => s + num(x.opt.proteinG), 0)),
+      caffeine: caffeineOf(mode, picks),
+      allergens,
+    };
   }
 
   // ---------------------------------------------------------------- navigation
@@ -144,8 +214,9 @@
     const el = document.createElement("section");
     el.className = "screen " + name;
     el.innerHTML = screen.html();
-    const old = app.querySelector(".screen:not(.leaving)");
-    app.appendChild(el);
+    const old = app.querySelector(".screen:not(.leaving):not(.owner)");
+    if (old) app.insertBefore(el, old.nextSibling);
+    else app.appendChild(el);
     const dir = opts.back ? -1 : 1;
     if (old) {
       old.classList.add("leaving");
@@ -169,9 +240,7 @@
   const layerHeight = () => 84 / Math.max(ingredients().length, 4);
 
   function cupHTML(extraClass, withLayers) {
-    const layers = withLayers
-      ? included().map((x) => layerHTML(x.i)).join("")
-      : "";
+    const layers = withLayers ? included().map((x) => layerHTML(x.i)).join("") : "";
     return `<div class="cup ${extraClass || ""}" aria-hidden="true">
         <div class="cup-straw"></div><div class="cup-lid"></div>
         <div class="cup-body"><div class="layer base"></div>${layers}</div>
@@ -199,21 +268,35 @@
 
   const SCREENS = {};
 
+  function greeting() {
+    const h = new Date().getHours();
+    if (h < 11) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  }
+
   // 1. Welcome / attract
   SCREENS.welcome = {
     html() {
       const plan = plans()[state.plan];
+      const fotm = S.flavorOfTheMonth ? ` · New: ${esc(S.flavorOfTheMonth)}` : "";
       return `
-        <div class="topbar">${logo(true)}</div>
+        <div class="topbar">${logo(true)}
+          <button class="icon-btn a11y-btn${app.classList.contains("a11y") ? " on" : ""}" data-act="a11y" aria-label="Larger text and higher contrast"><span class="aa">Aa</span></button>
+        </div>
         <div class="welcome-body">
           <div class="hero-stack" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <p class="eyebrow">${greeting()}${fotm}</p>
           <h1 class="display h1">${sloganHTML()}</h1>
           <p class="lead">Pre and post-workout drinks, mixed on the spot to your exact recipe.</p>
           ${plan ? `<p class="eyebrow" style="margin-top:16px">${esc(plan.name)} active (demo)</p>` : ""}
         </div>
         <div class="foot welcome-actions">
           <button class="btn btn-primary btn-start" data-act="start">Start ${icon("arrow")}</button>
-          <button class="btn btn-ghost" data-act="memberships" data-from="welcome">Memberships</button>
+          <div class="btn-pair">
+            <button class="btn btn-ghost" data-act="scan">${icon("scan")} Member tag</button>
+            <button class="btn btn-ghost" data-act="memberships" data-from="welcome">Memberships</button>
+          </div>
           ${installHint()}
         </div>`;
     },
@@ -227,6 +310,7 @@
       };
       fit();
       if (document.fonts) document.fonts.ready.then(fit);
+      this.fit = fit;
     },
   };
 
@@ -249,6 +333,72 @@
       </div>`;
   }
 
+  // Member tag scan (pretend)
+  SCREENS.scan = {
+    html() {
+      return `
+        <div class="topbar"><button class="icon-btn" data-act="back" data-to="welcome" aria-label="Back">${icon("back")}</button>${logo()}</div>
+        <div class="center-body">
+          <p class="eyebrow">Members</p>
+          <h2 class="display h2">Scan your<br>member tag</h2>
+          <button class="scanner" data-act="do-scan" aria-label="Simulate a scan">
+            <span class="scan-icon">${icon("scan")}</span>
+            <span class="scan-line"></span>
+            <span class="scan-label">Tap to simulate a scan</span>
+          </button>
+          <p class="lead" style="margin-top:0">Hold your gym key tag or the barcode in your gym app under the scanner.</p>
+          <p class="fine">Demo only. Designed to read the same tag members use to check in.</p>
+        </div>`;
+    },
+  };
+
+  // Member home: saved stacks, rewards, order ahead
+  SCREENS.member = {
+    html() {
+      const m = state.member;
+      const plan = plans()[state.plan];
+      const goal = Math.max(1, num(m.drinksForFreeOne, 10));
+      const progress = Math.min(goal, num(m.rewardsProgress));
+      const stacks = list(m.savedStacks)
+        .map((st, k) => {
+          if (!S.drinks[st.drink]) return "";
+          const picks = picksFrom(st.drink, st.picks);
+          const mp = memberPriceOf(st.drink, picks, state.plan);
+          const summary = includedOf(st.drink, picks).map((x) => `${x.ing.name} ${x.opt.label}`).join(" · ");
+          return `<div class="saved">
+              <div class="saved-top"><div><div class="saved-kind">${esc(S.drinks[st.drink].name)}</div><div class="saved-name">${esc(st.name)}</div></div>
+                <div class="saved-price">${mp.total === 0 ? "Included" : money(mp.total)}</div></div>
+              <p class="saved-sum">${esc(summary)}</p>
+              <button class="btn btn-primary" data-act="reorder" data-k="${k}">Reorder ${icon("arrow")}</button>
+            </div>`;
+        })
+        .join("");
+      return `
+        <div class="topbar"><button class="icon-btn" data-act="back" data-to="welcome" aria-label="Sign out">${icon("back")}</button>${logo()}</div>
+        <div class="scroll">
+          <div class="pad">
+            <p class="eyebrow">${plan ? esc(plan.name) : "Member"}</p>
+            <h2 class="display h2">Welcome back,<br>${esc(m.name)}.</h2>
+          </div>
+          <div class="member-stats">
+            <div class="mstat"><span class="mstat-ico">${icon("flame")}</span><div><b>${num(m.streakDays)}-day streak</b><span>Keep it going today</span></div></div>
+            <div class="mstat"><span class="mstat-ico">${icon("star")}</span><div><b>${progress} of ${goal}</b><span>toward a free stack</span></div></div>
+          </div>
+          <div class="reward-track"><i style="width:${(progress / goal) * 100}%"></i></div>
+          <div class="section-label">My stacks</div>
+          <div class="saved-list">${stacks || `<p class="muted pad">No saved stacks yet.</p>`}</div>
+          <div class="pad"><button class="btn btn-ghost" data-act="start-member">Build something new</button></div>
+          <div class="section-label">Order ahead</div>
+          <div class="notify">
+            <span class="notify-ico">${icon("phone")}</span>
+            <div><div class="notify-top"><b>Stackt</b><span>now</span></div>
+              <p>Your Leg Day Rebuild is mixed and waiting at the kiosk.</p></div>
+          </div>
+          <p class="plans-note" style="text-align:left">Members can order from their phone mid-workout and grab it on the way out. Preview only.</p>
+        </div>`;
+    },
+  };
+
   // 2. Choose pre or post
   SCREENS.choose = {
     html() {
@@ -262,8 +412,9 @@
             <span class="from">From ${money(num(d.basePrice))}</span></span>
           </button>`;
       };
+      const back = state.member ? "member" : "welcome";
       return `
-        <div class="topbar"><button class="icon-btn" data-act="back" data-to="welcome" aria-label="Back">${icon("back")}</button>${logo()}</div>
+        <div class="topbar"><button class="icon-btn" data-act="back" data-to="${back}" aria-label="Back">${icon("back")}</button>${logo()}</div>
         <div class="scroll"><div class="choose-body">
           <h2 class="display h2 choose-title">What are<br>we mixing?</h2>
           ${card("pre", "Before you lift", BOLT)}
@@ -276,7 +427,7 @@
   SCREENS.build = {
     html() {
       const d = drink();
-      const presets = d.signatureStacks || [];
+      const presets = list(d.signatureStacks);
       const rows = ingredients()
         .map(
           (ing, i) => `
@@ -290,6 +441,7 @@
                 .map(
                   (o, j) => `<button class="chip" data-act="pick" data-i="${i}" data-j="${j}">
                     <span class="c-label">${esc(o.label)}</span>
+                    ${o.note ? `<span class="c-note">${esc(o.note)}</span>` : ""}
                     <span class="c-price">${num(o.price) > 0 ? "+" + money(o.price) : isNone(o) ? "Skip" : "Included"}</span>
                   </button>`
                 )
@@ -300,7 +452,7 @@
         .join("");
       return `
         <div class="topbar">
-          <button class="icon-btn" data-act="back" data-to="choose" aria-label="Back">${icon("back")}</button>
+          <button class="icon-btn" data-act="back" data-to="${state.buildFrom}" aria-label="Back">${icon("back")}</button>
           ${logo()}
           <button class="icon-btn" data-act="reset-build" aria-label="Start over" style="justify-self:end">${icon("reset")}</button>
         </div>
@@ -318,6 +470,7 @@
             <div class="presets">${presets.map((p, k) => `<button class="preset" data-act="preset" data-k="${k}">${esc(p.name)}</button>`).join("")}</div>` : ""}
           <div class="section-label">Or pick every ingredient</div>
           <div class="ingredients">${rows}</div>
+          ${hasCaffeine() && S.caffeineAdvisory ? `<p class="demo-note advisory">${icon("alert")}<span>${esc(S.caffeineAdvisory)}</span></p>` : ""}
           <p class="demo-note">${icon("info")}<span>${esc(S.demoNote || "Demo values only.")}</span></p>
         </div>
         <div class="pricebar">
@@ -329,6 +482,7 @@
       this.el = el;
       this.lastPrice = price();
       this.lastPills = [];
+      this.lastTips = ruleHits(state.mode, state.picks, false);
       this.update(true);
     },
     update(first) {
@@ -342,8 +496,10 @@
         row.querySelectorAll(".chip").forEach((c) => {
           const j = +c.dataset.j;
           const on = j === state.picks[i];
+          const why = on ? null : blockReason(i, j);
           c.classList.toggle("on", on);
-          c.classList.toggle("blocked", !on && overLimit(i, j));
+          c.classList.toggle("blocked", !!why);
+          c.querySelector(".c-price").dataset.why = why ? why.short : "";
           c.setAttribute("aria-pressed", on);
         });
         const p = row.querySelector(".ing-price");
@@ -362,7 +518,8 @@
       const fresh = pills.querySelector(".pill.new");
       if (fresh) pills.scrollTo({ left: fresh.offsetLeft - 40, behavior: "smooth" });
       this.lastPills = keys;
-      el.querySelector(".summary-count").textContent = inc.length + (inc.length === 1 ? " ingredient" : " ingredients");
+      const n = nutritionOf(state.mode, state.picks);
+      el.querySelector(".summary-count").textContent = `${n.calories} cal` + (n.protein ? ` · ${n.protein} g protein` : "");
       // caffeine meter
       const meter = el.querySelector(".meter");
       if (meter) {
@@ -371,6 +528,13 @@
         meter.querySelector(".meter-fill").style.width = Math.min(100, (caf / caffeineLimit()) * 100) + "%";
         meter.classList.toggle("full", caf >= caffeineLimit());
       }
+      // taste tips that just became true
+      const tips = ruleHits(state.mode, state.picks, false);
+      if (!first) {
+        const fresh = tips.find((t) => !this.lastTips.includes(t));
+        if (fresh) toast("Taste tip: " + fresh.message, 3600);
+      }
+      this.lastTips = tips;
       // cup, presets, total
       syncCup(el.querySelector(".summary .cup-body"));
       const ap = activePreset();
@@ -402,9 +566,9 @@
     html() {
       const d = drink();
       const inc = included();
-      const full = price();
-      const mp = memberPrice(full);
-      const caf = caffeineTotal();
+      const mp = memberPrice();
+      const full = mp.full;
+      const n = nutritionOf(state.mode, state.picks);
       const lines = [
         `<div class="line"><span class="l-name">Base <b>cup, cold water and mixing</b></span><span class="l-price">${money(d.basePrice)}</span></div>`,
         ...inc.map(
@@ -417,22 +581,43 @@
       }
       lines.push(`<div class="line total-line"><span class="l-name">Total</span><span class="l-price">${mp.plan ? `<span class="was">${money(full)}</span>` : ""}${money(mp.total)}</span></div>`);
 
+      const facts = `<div class="facts">
+          <div><b>${n.calories}</b><span>Calories</span></div>
+          <div><b>${n.protein} g</b><span>Protein</span></div>
+          <div><b>${n.caffeine} mg</b><span>Caffeine</span></div>
+        </div>
+        <div class="allergens">
+          <p><b>Allergens:</b> ${n.allergens.length ? esc(n.allergens.join(", ")) : "None of the major allergens in this recipe"}</p>
+          ${S.allergenNote ? `<p class="muted">${esc(S.allergenNote)}</p>` : ""}
+          ${n.caffeine > 0 && S.caffeineAdvisory ? `<p class="muted">${esc(S.caffeineAdvisory)}</p>` : ""}
+        </div>`;
+
+      const tips = ruleHits(state.mode, state.picks, false)
+        .map((t) => `<p class="demo-note tip">${icon("info")}<span><b>Taste tip:</b> ${esc(t.message)}</span></p>`)
+        .join("");
+
       // "Members save" callout
-      let callout;
+      let callout = "";
       if (mp.plan) {
-        callout = `<div class="callout"><p class="eyebrow">Member pricing applied</p>
-          <p>${mp.plan.kind === "discount" ? `You save <b>${money(full - mp.total)}</b> on this stack with ${esc(mp.plan.name)}.` : `This stack is <b>covered</b> by your ${esc(mp.plan.name)} plan.`}</p>
-          <button class="btn btn-ghost" data-act="memberships" data-from="review">Change plan</button></div>`;
-      } else {
-        const disc = plans().find((p) => p.kind === "discount");
-        const flat = plans().find((p) => p.kind === "unlimited") || plans().find((p) => p.kind === "pack");
+        const what =
+          mp.plan.kind === "discount"
+            ? `You save <b>${money(full - mp.total)}</b> on this stack with ${esc(mp.plan.name)}.`
+            : mp.total > 0
+              ? `Your ${esc(mp.plan.name)} plan covers this stack. Premium upgrades are <b>${money(mp.total)}</b> at the Club price.`
+              : `This stack is <b>covered</b> by your ${esc(mp.plan.name)} plan.`;
+        callout = `<div class="callout"><p class="eyebrow">Member pricing applied</p><p>${what}</p>
+          ${state.member ? "" : `<button class="btn btn-ghost" data-act="memberships" data-from="review">Change plan</button>`}</div>`;
+      } else if (plans().length) {
+        const disc = planOfKind("discount");
+        const unl = planOfKind("unlimited");
         const bits = [];
         if (disc) bits.push(`${esc(disc.name)} members pay <b>${money(full * (1 - num(disc.discountPercent) / 100))}</b> for this stack, ${num(disc.discountPercent)}% off.`);
-        if (flat) bits.push(`On ${esc(flat.name)} it's <b>included</b>.`);
-        callout = plans().length
-          ? `<div class="callout"><p class="eyebrow">Members save</p><p>${bits.join(" ")}</p>
-              <button class="btn btn-ghost" data-act="memberships" data-from="review">See membership options</button></div>`
-          : "";
+        if (unl) {
+          const u = memberPriceOf(state.mode, state.picks, plans().indexOf(unl));
+          bits.push(u.total > 0 ? `On ${esc(unl.name)} it's just <b>${money(u.total)}</b> for the premium upgrades.` : `On ${esc(unl.name)} it's <b>included</b>.`);
+        }
+        callout = `<div class="callout"><p class="eyebrow">Members save</p><p>${bits.join(" ")}</p>
+            <button class="btn btn-ghost" data-act="memberships" data-from="review">See membership options</button></div>`;
       }
       const payLabel = mp.plan && mp.total === 0 ? "Redeem" : "Pay " + money(mp.total);
       return `
@@ -441,9 +626,11 @@
           <div class="review-hero">
             ${cupHTML("", true)}
             <div><p class="eyebrow">Review your stack</p><h2 class="display h2">${esc(d.name)}</h2>
-              <p class="muted" style="margin:8px 0 0">${inc.length} ingredients${hasCaffeine() ? ` · ${caf} mg caffeine` : ""}</p></div>
+              <p class="muted" style="margin:8px 0 0">${inc.length} ingredients</p></div>
           </div>
           <div class="lines">${lines.join("")}</div>
+          ${facts}
+          ${tips}
           ${callout}
         </div>
         <div class="foot btn-row">
@@ -456,7 +643,7 @@
   // 5. Fake checkout
   SCREENS.pay = {
     html() {
-      const mp = memberPrice(price());
+      const mp = memberPrice();
       const covered = mp.plan && mp.total === 0;
       return `
         <div class="topbar"><button class="icon-btn" data-act="back" data-to="review" aria-label="Back">${icon("back")}</button></div>
@@ -527,14 +714,38 @@
     },
   };
 
+  // Records a member's drink: rewards progress and saving the stack.
+  function memberAfterDrink() {
+    const m = state.member;
+    if (!m) return "";
+    const goal = Math.max(1, num(m.drinksForFreeOne, 10));
+    m.rewardsProgress = num(m.rewardsProgress) + 1;
+    let reward;
+    if (m.rewardsProgress >= goal) {
+      m.rewardsProgress = 0;
+      reward = "Free stack unlocked! It's waiting on your next visit.";
+    } else {
+      reward = `+1 toward a free stack: ${m.rewardsProgress} of ${goal}`;
+    }
+    const saved = list(m.savedStacks).some((st) => st.drink === state.mode && samePicks(picksFrom(st.drink, st.picks), state.picks));
+    let savedMsg = "";
+    if (!saved) {
+      m.savedStacks = list(m.savedStacks).concat({ name: `My ${drink().name}`, drink: state.mode, picks: namedFrom(state.mode, state.picks) });
+      savedMsg = `<p class="member-note">${icon("check")}<span>Saved to My Stacks for one-tap reorder</span></p>`;
+    }
+    return `<p class="member-note">${icon("star")}<span>${reward}</span></p>${savedMsg}`;
+  }
+
   SCREENS.ready = {
     html() {
+      const extra = memberAfterDrink();
       return `
         <div class="topbar"></div>
         <div class="center-body">
           <div class="ready-check">${icon("check")}</div>
           <h2 class="display h2">Your Stackt<br>is <span class="lime">ready.</span></h2>
           <p class="lead">Grab it below.</p>
+          ${extra}
           <div class="grab">${icon("down")}<span>Pickup</span></div>
         </div>
         <div class="foot">
@@ -559,6 +770,9 @@
     state.mode = null;
     state.picks = [];
     state.plan = null;
+    state.member = null;
+    state.buildFrom = "choose";
+    app.classList.remove("a11y");
     go("welcome", { back: true });
   }
 
@@ -574,12 +788,12 @@
           if (p.kind === "discount") value = `${num(p.discountPercent)}% off every stack`;
           const current = state.plan === k;
           return `<article class="plan${p.badge ? " featured" : ""}${current ? " current" : ""}">
-              <span class="plan-tag">${esc(p.tag)}</span>
-              ${p.badge ? `<span class="plan-badge">${esc(p.badge)}</span>` : ""}
+              <div class="plan-tags"><span class="plan-tag">${esc(p.tag)}</span>
+              ${p.badge ? `<span class="plan-badge">${esc(p.badge)}</span>` : ""}</div>
               <h3 class="display plan-name">${esc(p.name)}</h3>
               <div class="plan-price"><b>${moneyShort(price)}</b><span>/ month</span></div>
               ${value ? `<div class="plan-value">${value}</div>` : ""}
-              <ul>${(p.perks || []).map((x) => `<li>${icon("check")}<span>${esc(x)}</span></li>`).join("")}</ul>
+              <ul>${list(p.perks).map((x) => `<li>${icon("check")}<span>${esc(x)}</span></li>`).join("")}</ul>
               <button class="btn ${current ? "btn-ghost" : "btn-primary"}" data-act="choose-plan" data-k="${k}">${current ? "Selected " + icon("check") : "Choose " + esc(p.name)}</button>
             </article>`;
         })
@@ -614,24 +828,117 @@
   };
 
   // 7. Owner dashboard (hidden overlay)
+  function colsChart(values, labelFor, startIndex, axis) {
+    const max = Math.max(1, ...values);
+    const step = [5, 10, 20, 25, 50, 100, 200, 500].find((s) => max / s <= 4) || 1000;
+    const yMax = Math.ceil(max / step) * step;
+    const ticks = [];
+    for (let v = step; v <= yMax; v += step) ticks.push(v);
+    return `<div class="chart-read"><span class="col-label">${esc(labelFor(startIndex))}</span><b class="col-val">${values[startIndex]} drinks</b></div>
+      <div class="cols">
+        ${ticks.map((v) => `<div class="grid" style="bottom:${(v / yMax) * 100}%"><span>${v}</span></div>`).join("")}
+        ${values.map((n, k) => `<button class="col${k === startIndex ? " on" : ""}" data-act="col" data-k="${k}" aria-label="${esc(labelFor(k))}: ${n} drinks"><i style="height:${(n / yMax) * 100}%"></i></button>`).join("")}
+      </div>
+      <div class="col-axis"><span>${esc(axis[0])}</span><span>${esc(axis[1])}</span></div>`;
+  }
+  const dayLabel = (days) => (k) => {
+    const ago = days.length - 1 - k;
+    return ago === 0 ? "Today" : ago === 1 ? "Yesterday" : `${ago} days ago`;
+  };
+
   function ownerHTML() {
     const o = S.owner || {};
     const gross = num(o.grossRevenue);
     const sharePct = num(o.revenueSharePercent);
     const share = (gross * sharePct) / 100;
     const sold = num(o.drinksSold);
-    const days = Array.isArray(o.drinksPerDay) ? o.drinksPerDay.map((n) => num(n)) : [];
-    const top = Array.isArray(o.topStacks) ? o.topStacks : [];
+    const days = list(o.drinksPerDay).map((n) => num(n));
+    const hours = list(o.drinksByHour);
+    const hourVals = hours.map((h) => num(h.drinks));
+    const peak = hourVals.indexOf(Math.max(...hourVals));
+    const top = list(o.topStacks);
     const maxTop = Math.max(1, ...top.map((t) => num(t.sold)));
     const pre = Math.max(0, Math.min(100, num(o.preWorkoutPercent, 50)));
     const delta = num(o.changeVsLastMonthPercent);
+    const gymMembers = num(o.gymMembers);
+    const kpi = (label, value, sub) =>
+      `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>${sub ? `<div class="kpi-delta">${sub}</div>` : ""}</div>`;
+    const checks = (items) => `<ul class="checks">${list(items).map((x) => `<li>${icon("check")}<span>${esc(x)}</span></li>`).join("")}</ul>`;
 
-    // clean y-axis ticks for the daily chart
-    const maxDay = Math.max(1, ...days);
-    const stepSize = [5, 10, 20, 25, 50, 100, 200, 500].find((s) => maxDay / s <= 4) || 1000;
-    const yMax = Math.ceil(maxDay / stepSize) * stepSize;
-    const ticks = [];
-    for (let v = stepSize; v <= yMax; v += stepSize) ticks.push(v);
+    const results = `
+      <div class="card hero-card">
+        <p class="card-title">Your share this month</p>
+        <div class="hero-num">${moneyBig(share)}</div>
+        <p class="hero-sub"><b>${sharePct}%</b> of <b>${moneyBig(gross)}</b> in Stackt sales at your gym</p>
+      </div>
+      <div class="kpis">
+        ${kpi("Drinks sold", sold.toLocaleString("en-US"), delta ? `${delta > 0 ? "▲ +" : "▼ "}${delta}% vs last month` : "")}
+        ${kpi("Gross revenue", moneyBig(gross))}
+        ${gymMembers ? kpi("Revenue per member", money(gross / gymMembers), "per gym member, per month") : ""}
+        ${gymMembers ? kpi("Members using Stackt", Math.round((num(o.monthlyUsers) / gymMembers) * 100) + "%", `${num(o.monthlyUsers)} of ${gymMembers.toLocaleString("en-US")}`) : ""}
+        ${kpi("Repeat rate", num(o.repeatRatePercent) + "%", "came back for another")}
+        ${kpi("Stackt memberships", num(o.activeMembers).toLocaleString("en-US"))}
+      </div>
+      ${days.length ? `<div class="card" data-chart="days">
+        <p class="card-title">Drinks per day, last ${days.length} days</p>
+        ${colsChart(days, dayLabel(days), days.length - 1, [`${days.length} days ago`, "Today"])}
+      </div>` : ""}
+      ${hours.length ? `<div class="card" data-chart="hours">
+        <p class="card-title">Busiest hours</p>
+        ${colsChart(hourVals, (k) => hours[k].time, peak, [hours[0].time, hours[hours.length - 1].time])}
+      </div>` : ""}
+      ${top.length ? `<div class="card">
+        <p class="card-title">Most popular stacks</p>
+        <div class="hbars">${top
+          .map((t, k) => `<div><div class="hbar-top"><b>${esc(t.name)}</b><span>${num(t.sold).toLocaleString("en-US")}</span></div>
+            <div class="hbar-track"><i style="width:${(num(t.sold) / maxTop) * 100}%;animation-delay:${k * 80}ms"></i></div></div>`)
+          .join("")}</div>
+      </div>` : ""}
+      <div class="card">
+        <p class="card-title">Pre vs post-workout</p>
+        <div class="split"><i style="width:${pre}%"></i><i style="width:${100 - pre}%"></i></div>
+        <div class="legend"><span><i></i>Pre-workout ${pre}%</span><span><i></i>Post-workout ${100 - pre}%</span></div>
+      </div>
+      <div class="card">
+        <p class="card-title">Machine health</p>
+        <div class="health-row"><span>Uptime this month</span><b>${num(o.uptimePercent)}%</b></div>
+        <div class="health-row"><span>Last sanitized</span><b>${esc(o.lastSanitized || "Today")}</b></div>
+        <div class="stock">${list(o.stockLevels)
+          .map((s) => {
+            const p = Math.max(0, Math.min(100, num(s.percent)));
+            return `<div class="stock-row"><div class="hbar-top"><b>${esc(s.name)}</b><span>${p < 25 ? "Low · restock booked" : p + "%"}</span></div>
+              <div class="meter-track"><div class="meter-fill${p < 25 ? " low" : ""}" style="width:${p}%"></div></div></div>`;
+          })
+          .join("")}</div>
+      </div>`;
+
+    const bonus = num(o.bonusSharePercent);
+    const dealRows = [
+      { label: "Your share", value: `${sharePct}% of sales after tax and refunds` },
+      ...(bonus && num(o.bonusAboveMonthlySales) ? [{ label: "Busy-gym bonus", value: `${bonus}% on monthly sales above ${moneyBig(num(o.bonusAboveMonthlySales))}` }] : []),
+      ...list(o.dealTerms),
+    ];
+    const deal = `
+      <div class="card hero-card">
+        <p class="card-title">The deal</p>
+        <dl class="terms">${dealRows.map((r) => `<div><dt>${esc(r.label)}</dt><dd>${esc(r.value)}</dd></div>`).join("")}</dl>
+      </div>
+      ${o.pilot ? `<div class="card"><p class="card-title">Try it first</p><p class="card-text">${esc(o.pilot)}</p></div>` : ""}
+      ${o.shakeBarAnswer ? `<div class="card"><p class="card-title">Have a shake bar already?</p><p class="card-text">${esc(o.shakeBarAnswer)}</p></div>` : ""}
+      ${list(o.whatYouGet).length ? `<div class="card"><p class="card-title">What's in it for you</p>${checks(o.whatYouGet)}</div>` : ""}`;
+
+    const setup = `
+      <div class="card">
+        <p class="card-title">What the kiosk needs</p>
+        <dl class="terms">${list(o.siteRequirements)
+          .map((r) => `<div><dt>${esc(r.label)}</dt><dd>${esc(r.value)}${r.confirmed ? "" : ` <span class="tbc">To be confirmed</span>`}</dd></div>`)
+          .join("")}</dl>
+      </div>
+      ${list(o.compliance).length ? `<div class="card"><p class="card-title">Permits, insurance and safety: handled</p>${checks(o.compliance)}</div>` : ""}
+      ${list(o.hygiene).length ? `<div class="card"><p class="card-title">Clean every time</p>${checks(o.hygiene)}
+        <div class="health-row" style="margin-top:14px"><span>Last sanitized</span><b>${esc(o.lastSanitized || "Today")}</b></div></div>` : ""}
+      <div class="card" style="margin-bottom:calc(var(--safe-bottom) + 24px)"><p class="card-title">Accessible</p>
+        ${checks(["Larger text and high-contrast mode on the start screen", "Every control usable by touch, with big tap targets"])}</div>`;
 
     return `
       <div class="topbar">
@@ -640,52 +947,17 @@
       </div>
       <div class="scroll">
         <div class="owner-head">
-          <h2 class="display h3">${esc(o.gymName || S.gymName || "Your gym")}</h2>
+          <h2 class="display h3">${esc(S.gymName || "Your gym")}</h2>
           <p class="muted">${esc(o.monthLabel || "This month")} <span class="sample">Sample data</span></p>
         </div>
-
-        <div class="card hero-card">
-          <p class="card-title">Your share this month</p>
-          <div class="hero-num">${moneyBig(share)}</div>
-          <p class="hero-sub"><b>${sharePct}%</b> of <b>${moneyBig(gross)}</b> in Stackt sales at your gym</p>
+        <div class="tabs" role="tablist">
+          <button class="tab on" data-act="owner-tab" data-tab="results" role="tab">Results</button>
+          <button class="tab" data-act="owner-tab" data-tab="deal" role="tab">The deal</button>
+          <button class="tab" data-act="owner-tab" data-tab="setup" role="tab">Setup</button>
         </div>
-
-        <div class="kpis">
-          <div class="kpi"><div class="kpi-label">Drinks sold</div><div class="kpi-value">${sold.toLocaleString("en-US")}</div>
-            ${delta ? `<div class="kpi-delta">${delta > 0 ? "▲ +" : "▼ "}${delta}% vs last month</div>` : ""}</div>
-          <div class="kpi"><div class="kpi-label">Gross revenue</div><div class="kpi-value">${moneyBig(gross)}</div></div>
-          <div class="kpi"><div class="kpi-label">Active members</div><div class="kpi-value">${num(o.activeMembers).toLocaleString("en-US")}</div></div>
-          <div class="kpi"><div class="kpi-label">Avg per drink</div><div class="kpi-value">${sold ? money(gross / sold) : "—"}</div></div>
-        </div>
-
-        ${days.length ? `<div class="card">
-          <p class="card-title">Drinks per day, last ${days.length} days</p>
-          <div class="chart-read"><span class="day-label">Today</span><b class="day-val">${days[days.length - 1]} drinks</b></div>
-          <div class="cols">
-            ${ticks.map((v) => `<div class="grid" style="bottom:${(v / yMax) * 100}%"><span>${v}</span></div>`).join("")}
-            ${days.map((n, k) => `<button class="col${k === days.length - 1 ? " on" : ""}" data-act="day" data-k="${k}" aria-label="${n} drinks"><i style="height:${(n / yMax) * 100}%"></i></button>`).join("")}
-          </div>
-          <div class="col-axis"><span>${days.length} days ago</span><span>Today</span></div>
-        </div>` : ""}
-
-        ${top.length ? `<div class="card">
-          <p class="card-title">Most popular stacks</p>
-          <div class="hbars">${top
-            .map((t, k) => `<div><div class="hbar-top"><b>${esc(t.name)}</b><span>${num(t.sold).toLocaleString("en-US")}</span></div>
-              <div class="hbar-track"><i style="width:${(num(t.sold) / maxTop) * 100}%;animation-delay:${k * 80}ms"></i></div></div>`)
-            .join("")}</div>
-        </div>` : ""}
-
-        <div class="card">
-          <p class="card-title">Pre vs post-workout</p>
-          <div class="split"><i style="width:${pre}%"></i><i style="width:${100 - pre}%"></i></div>
-          <div class="legend"><span><i></i>Pre-workout ${pre}%</span><span><i></i>Post-workout ${100 - pre}%</span></div>
-        </div>
-
-        ${Array.isArray(o.whatYouGet) && o.whatYouGet.length ? `<div class="card" style="margin-bottom:calc(var(--safe-bottom) + 24px)">
-          <p class="card-title">What's in it for you</p>
-          <ul class="checks">${o.whatYouGet.map((x) => `<li>${icon("check")}<span>${esc(x)}</span></li>`).join("")}</ul>
-        </div>` : ""}
+        <div class="pane" data-pane="results">${results}</div>
+        <div class="pane" data-pane="deal" hidden>${deal}</div>
+        <div class="pane" data-pane="setup" hidden>${setup}</div>
       </div>`;
   }
 
@@ -755,19 +1027,57 @@
       case "start":
         go("choose");
         break;
+      case "start-member":
+        state.buildFrom = "choose";
+        go("choose");
+        break;
       case "back":
         go(t.dataset.to, { back: true });
         break;
+      case "a11y":
+        app.classList.toggle("a11y");
+        t.classList.toggle("on", app.classList.contains("a11y"));
+        if (SCREENS.welcome.fit) SCREENS.welcome.fit();
+        toast(app.classList.contains("a11y") ? "Larger text and high contrast on" : "Standard display");
+        break;
+      case "scan":
+        go("scan");
+        break;
+      case "do-scan": {
+        if (t.classList.contains("reading")) break;
+        t.classList.add("reading");
+        t.querySelector(".scan-label").textContent = "Reading tag…";
+        timers.push(
+          setTimeout(() => {
+            const m = S.demoMember || {};
+            state.member = JSON.parse(JSON.stringify({ name: "Member", savedStacks: [], ...m }));
+            const plan = planOfKind(m.plan);
+            state.plan = plan ? plans().indexOf(plan) : null;
+            go("member");
+          }, 1300)
+        );
+        break;
+      }
+      case "reorder": {
+        const st = state.member.savedStacks[+t.dataset.k];
+        state.mode = st.drink;
+        state.picks = picksFrom(st.drink, st.picks);
+        state.buildFrom = "member";
+        go("review");
+        break;
+      }
       case "mode":
         startBuild(t.dataset.mode);
+        state.buildFrom = "choose";
         go("build");
         break;
       case "pick": {
         const i = +t.dataset.i;
         const j = +t.dataset.j;
         if (state.picks[i] === j) break;
-        if (overLimit(i, j)) {
-          toast(`That would go over the ${caffeineLimit()} mg caffeine limit. Lower another caffeine source first.`, 3200);
+        const why = blockReason(i, j);
+        if (why) {
+          toast(why.long, 3400);
           break;
         }
         state.picks[i] = j;
@@ -776,7 +1086,7 @@
       }
       case "preset": {
         const p = drink().signatureStacks[+t.dataset.k];
-        state.picks = presetPicks(p);
+        state.picks = picksFrom(state.mode, p.picks);
         B.update();
         toast(`${p.name} loaded. Tweak anything you like.`);
         break;
@@ -797,7 +1107,7 @@
         go("memberships");
         break;
       case "dot": {
-        const track = app.querySelector(".screen:not(.leaving) .plans");
+        const track = app.querySelector(".screen:not(.leaving):not(.owner) .plans");
         track.scrollTo({ left: track.children[+t.dataset.k].offsetLeft - 20, behavior: "smooth" });
         break;
       }
@@ -835,14 +1145,22 @@
       case "close-owner":
         closeOwner();
         break;
-      case "day": {
+      case "owner-tab": {
+        const owner = t.closest(".screen.owner");
+        owner.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b === t));
+        owner.querySelectorAll(".pane").forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
+        owner.querySelector(".scroll").scrollTop = 0;
+        break;
+      }
+      case "col": {
         const card = t.closest(".card");
-        const days = S.owner.drinksPerDay;
+        const o = S.owner;
         const k = +t.dataset.k;
         card.querySelectorAll(".col").forEach((c) => c.classList.toggle("on", c === t));
-        const ago = days.length - 1 - k;
-        card.querySelector(".day-label").textContent = ago === 0 ? "Today" : ago === 1 ? "Yesterday" : `${ago} days ago`;
-        card.querySelector(".day-val").textContent = `${days[k]} drinks`;
+        const hours = card.dataset.chart === "hours";
+        const days = list(o.drinksPerDay);
+        card.querySelector(".col-label").textContent = hours ? o.drinksByHour[k].time : dayLabel(days)(k);
+        card.querySelector(".col-val").textContent = `${hours ? o.drinksByHour[k].drinks : days[k]} drinks`;
         break;
       }
     }
