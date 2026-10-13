@@ -30,6 +30,14 @@ A clickable kiosk demo for **Stackt**, a smart vending kiosk that mixes fresh pr
 3. Scroll down and tap **Add to Home Screen**, then **Add**.
 4. Open Stackt from the new home screen icon. It runs full screen with no Safari bars.
 
+## Phone showing an old version?
+
+Open the hidden owner view and scroll to the bottom. It shows the demo version number (for example "Demo version 4"). If it's older than what you expect:
+
+1. **Safari:** pull down on the page to reload, or close the tab and open the link again.
+2. **Home-screen app:** swipe up from the bottom and pause to see your open apps, swipe Stackt away to close it fully, then open it again. The app also checks for updates by itself and switches to the newest version the next time it is on the welcome screen.
+3. Still old? Press and hold the Stackt icon, tap **Remove App**, then add it to your home screen again from Safari.
+
 ## Change a price or anything else
 
 Everything you might want to change is in **`settings.js`**: prices, ingredients, amounts, nutrition, taste rules, signature stacks, membership plans, the demo member, and the owner dashboard numbers and deal terms.
